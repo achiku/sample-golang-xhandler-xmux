@@ -46,16 +46,39 @@ func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(fn)
 }
 
-func hello(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+func hello(ctx context.Context, w http.ResponseWriter, r *http.Request) (int, interface{}, error) {
 	l := xlog.FromContext(ctx)
 	fmt.Fprintf(w, "api hello!")
 	l.Debugf("debug")
+	return http.StatusOK, "ok", nil
+}
+
+func staticHello(ctx context.Context, w http.ResponseWriter, r *http.Request) (int, interface{}, error) {
+	fmt.Fprintf(w, "static hello!")
+	return http.StatusOK, "ok", nil
+}
+
+type myH struct {
+	*app
+	handler func(ctx context.Context, w http.ResponseWriter, r *http.Request) (int, interface{}, error)
+}
+
+func (h myH) ServeHTTPC(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	l := xlog.FromContext(ctx)
+	l.Infof("%+v", h.app)
+	status, res, err := h.handler(ctx, w, r)
+	if err != nil {
+		l.Error(err.Error())
+	}
+	if status != http.StatusOK {
+		l.Debugf("%+v", res)
+	}
+	l.Debugf("%+v", res)
 	return
 }
 
-func staticHello(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "static hello!")
-	return
+type app struct {
+	Role string
 }
 
 func main() {
@@ -72,10 +95,9 @@ func main() {
 		Output: xlog.NewOutputChannel(xlog.NewConsoleOutput()),
 	}
 
-	// Optionally plug the xlog handler's input to Go's default logger
-	log.SetFlags(0)
-	xlogger := xlog.New(conf)
-	log.SetOutput(xlogger)
+	// log.SetFlags(0)
+	// xlogger := xlog.New(conf)
+	// log.SetOutput(xlogger)
 
 	baseChain := xhandler.Chain{}
 	baseChain.Add(
@@ -93,13 +115,14 @@ func main() {
 		authMiddleware,
 	)
 
+	a := &app{Role: "test-server"}
 	mux := xmux.New()
 
 	apiMux := mux.NewGroup("/v1")
-	apiMux.GET("/hello", apiChain.HandlerC(xhandler.HandlerFuncC(hello)))
+	apiMux.GET("/hello", apiChain.HandlerC(myH{app: a, handler: hello}))
 
 	staticMux := mux.NewGroup("/static")
-	staticMux.GET("/hello", baseChain.HandlerC(xhandler.HandlerFuncC(staticHello)))
+	staticMux.GET("/hello", baseChain.HandlerC(myH{app: a, handler: staticHello}))
 
 	rootCtx := context.Background()
 	if err := http.ListenAndServe(":8081", xhandler.New(rootCtx, mux)); err != nil {
