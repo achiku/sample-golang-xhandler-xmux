@@ -96,6 +96,7 @@ func main() {
 			1: xlog.NewJSONOutput(os.Stdout),
 		}),
 	}
+	xlog.SetLogger(xlog.New(conf))
 
 	baseChain := xhandler.Chain{}
 	baseChain.Add(
