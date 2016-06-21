@@ -47,14 +47,16 @@ func authMiddleware(next http.Handler) http.Handler {
 }
 
 func hello(ctx context.Context, w http.ResponseWriter, r *http.Request) (int, interface{}, error) {
-	l := xlog.FromContext(ctx)
+	logger := xlog.FromContext(ctx)
 	fmt.Fprintf(w, "api hello!")
-	l.Debugf("debug")
+	logger.Debugf("plain hello", xlog.F{"handler": "hello"})
 	return http.StatusOK, "ok", nil
 }
 
 func staticHello(ctx context.Context, w http.ResponseWriter, r *http.Request) (int, interface{}, error) {
+	logger := xlog.FromContext(ctx)
 	fmt.Fprintf(w, "static hello!")
+	logger.Debugf("static hello", xlog.F{"handler": "staticHello"})
 	return http.StatusOK, "ok", nil
 }
 
@@ -64,16 +66,16 @@ type myH struct {
 }
 
 func (h myH) ServeHTTPC(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	l := xlog.FromContext(ctx)
-	l.Infof("%+v", h.app)
+	logger := xlog.FromContext(ctx)
+	logger.Infof("%+v", h.app)
 	status, res, err := h.handler(ctx, w, r)
 	if err != nil {
-		l.Error(err.Error())
+		logger.Error(err.Error())
 	}
 	if status != http.StatusOK {
-		l.Debugf("%+v", res)
+		logger.Debugf("%+v", res)
 	}
-	l.Debugf("%+v", res)
+	logger.Debugf("%+v", res)
 	return
 }
 
@@ -84,20 +86,16 @@ type app struct {
 func main() {
 	host, _ := os.Hostname()
 	conf := xlog.Config{
-		// Log info level and higher
-		Level: xlog.LevelInfo,
-		// Set some global env fields
+		Level: xlog.LevelDebug,
 		Fields: xlog.F{
 			"role": "my-service",
 			"host": host,
 		},
-		// Output everything on console
-		Output: xlog.NewOutputChannel(xlog.NewConsoleOutput()),
+		Output: xlog.NewOutputChannel(xlog.MultiOutput{
+			0: xlog.NewConsoleOutput(),
+			1: xlog.NewJSONOutput(os.Stdout),
+		}),
 	}
-
-	// log.SetFlags(0)
-	// xlogger := xlog.New(conf)
-	// log.SetOutput(xlogger)
 
 	baseChain := xhandler.Chain{}
 	baseChain.Add(
@@ -124,6 +122,7 @@ func main() {
 	staticMux := mux.NewGroup("/static")
 	staticMux.GET("/hello", baseChain.HandlerC(myH{app: a, handler: staticHello}))
 
+	xlog.Info("starting server")
 	rootCtx := context.Background()
 	if err := http.ListenAndServe(":8081", xhandler.New(rootCtx, mux)); err != nil {
 		log.Fatal(err)
